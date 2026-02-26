@@ -4,6 +4,9 @@
 
 AI kernels for JupyterLite. This extension dynamically registers one kernel per configured AI provider from `@jupyterlite/ai`. When users open a notebook with one of these kernels, cell contents are sent as prompts to the AI model and responses are streamed back.
 
+https://github.com/user-attachments/assets/ee5bc8b1-c0bd-4603-b2f4-a98db350d217
+
+
 ## Requirements
 
 - JupyterLite >= 0.6.0
