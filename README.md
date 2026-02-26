@@ -1,6 +1,7 @@
 # jupyterlite-ai-kernels
 
 [![Github Actions Status](https://github.com/jtpio/jupyterlite-ai-kernels/workflows/Build/badge.svg)](https://github.com/jtpio/jupyterlite-ai-kernels/actions/workflows/build.yml)
+[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://jtpio.github.io/jupyterlite-ai-kernels/lab/index.html)
 
 AI kernels for JupyterLite. This extension dynamically registers one kernel per configured AI provider from `@jupyterlite/ai`. When users open a notebook with one of these kernels, cell contents are sent as prompts to the AI model and responses are streamed back.
 
