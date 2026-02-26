@@ -1,0 +1,15 @@
+[project]
+name = "jupyterlite-ai-kernels-demo"
+version = "0.1.0"
+description = "JupyterLite AI kernels demo"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "jupyterlite-ai>=0.12.0",
+    "jupyterlite-ai-kernels",
+    "jupyterlite-core>=0.7.0",
+    "jupyterlite-pyodide-kernel>=0.7.0",
+]
+
+[tool.uv.sources]
+jupyterlite-ai-kernels = { path = "../" }
