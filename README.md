@@ -6,7 +6,6 @@ AI kernels for JupyterLite. This extension dynamically registers one kernel per 
 
 https://github.com/user-attachments/assets/ee5bc8b1-c0bd-4603-b2f4-a98db350d217
 
-
 ## Requirements
 
 - JupyterLite >= 0.6.0
