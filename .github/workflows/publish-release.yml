@@ -24,6 +24,8 @@ jobs:
           node_version: '24'
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
 
       - uses: actions/create-github-app-token@v1
         id: app-token
