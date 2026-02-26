@@ -1,0 +1,14 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v4.3.8
+_src_path: https://github.com/jupyterlab/extension-template
+author_email: ''
+author_name: JupyterLite Contributors
+has_binder: false
+has_settings: false
+kind: frontend
+labextension_name: '@jupyterlite/ai-kernels'
+project_short_description: AI kernels for JupyterLite
+python_name: jupyterlite_ai_kernels
+repository: https://github.com/jtpio/jupyterlite-ai-kernels
+test: false
+
