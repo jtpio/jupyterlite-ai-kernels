@@ -12,5 +12,5 @@ except ImportError:
 def _jupyter_labextension_paths():
     return [{
         "src": "labextension",
-        "dest": "@jupyterlite/ai-kernels"
+        "dest": "jupyterlite-ai-kernels"
     }]

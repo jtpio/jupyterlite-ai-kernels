@@ -2,30 +2,6 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
-## 0.1.1
-
-([Full Changelog](https://github.com/jtpio/jupyterlite-ai-kernels/compare/b324437230e6f79f77e58e9719a3c87fde006fa7...978dad580163b466cf539400b49c7fe61418a742))
-
-### Maintenance and upkeep improvements
-
-- Remove `packageManager` from `package.json` [#2](https://github.com/jtpio/jupyterlite-ai-kernels/pull/2) ([@jtpio](https://github.com/jtpio))
-
-### Documentation improvements
-
-- Add JupyterLite badge [#4](https://github.com/jtpio/jupyterlite-ai-kernels/pull/4) ([@jtpio](https://github.com/jtpio))
-- JupyterLite demo [#3](https://github.com/jtpio/jupyterlite-ai-kernels/pull/3) ([@jtpio](https://github.com/jtpio))
-
-### Contributors to this release
-
-The following people contributed discussions, new ideas, code and documentation contributions, and review.
-See [our definition of contributors](https://github-activity.readthedocs.io/en/latest/use/#how-does-this-tool-define-contributions-in-the-reports).
-
-([GitHub contributors page for this release](https://github.com/jtpio/jupyterlite-ai-kernels/graphs/contributors?from=2026-02-26&to=2026-02-27&type=c))
-
-@jtpio ([activity](https://github.com/search?q=repo%3Ajtpio%2Fjupyterlite-ai-kernels+involves%3Ajtpio+updated%3A2026-02-26..2026-02-27&type=Issues))
-
-<!-- <END NEW CHANGELOG ENTRY> -->
-
 ## 0.4.0
 
 ([Full Changelog](https://github.com/jupyterlite/echo-kernel/compare/v0.3.0...cffb85d01a5253b36c87b11588da17af2d776774))
@@ -41,6 +17,8 @@ See [our definition of contributors](https://github-activity.readthedocs.io/en/l
 ([GitHub contributors page for this release](https://github.com/jupyterlite/echo-kernel/graphs/contributors?from=2025-06-02&to=2025-11-26&type=c))
 
 [@jtpio](https://github.com/search?q=repo%3Ajupyterlite%2Fecho-kernel+involves%3Ajtpio+updated%3A2025-06-02..2025-11-26&type=Issues)
+
+<!-- <END NEW CHANGELOG ENTRY> -->
 
 ## 0.4.0a0
 

@@ -37,8 +37,8 @@ artifacts = ["jupyterlite_ai_kernels/labextension"]
 exclude = [".github", "binder"]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"jupyterlite_ai_kernels/labextension" = "share/jupyter/labextensions/@jupyterlite/ai-kernels"
-"install.json" = "share/jupyter/labextensions/@jupyterlite/ai-kernels/install.json"
+"jupyterlite_ai_kernels/labextension" = "share/jupyter/labextensions/jupyterlite-ai-kernels"
+"install.json" = "share/jupyter/labextensions/jupyterlite-ai-kernels/install.json"
 
 [tool.hatch.build.hooks.version]
 path = "jupyterlite_ai_kernels/_version.py"

@@ -28,7 +28,7 @@ import { AIKernelManager } from './kernel-manager';
  * A plugin to register AI kernels dynamically based on configured providers.
  */
 const aiKernelsPlugin: JupyterFrontEndPlugin<void> = {
-  id: '@jupyterlite/ai-kernels:plugin',
+  id: 'jupyterlite-ai-kernels:plugin',
   autoStart: true,
   // Cast tokens to work around portal-based type mismatches with @lumino/coreutils
   requires: [IKernelSpecs, IAISettingsModel, IAgentManagerFactory] as any,
