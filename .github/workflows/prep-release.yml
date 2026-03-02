@@ -31,10 +31,6 @@ jobs:
     steps:
       - uses: jtpio/maintainer-tools/.github/actions/base-setup@pnpm
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.0
-
       - name: Prep Release
         id: prep-release
         uses: jupyter-server/jupyter_releaser/.github/actions/prep-release@v2
