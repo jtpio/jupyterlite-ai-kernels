@@ -19,7 +19,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - uses: jtpio/maintainer-tools/.github/actions/base-setup@pnpm
         with:
           node_version: '24'
 
