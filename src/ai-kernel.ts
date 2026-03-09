@@ -5,12 +5,19 @@ import type { PartialJSONObject } from '@lumino/coreutils';
 
 import type { KernelMessage } from '@jupyterlab/services';
 import type * as nbformat from '@jupyterlab/nbformat';
+import {
+  nullTranslator,
+  type TranslationBundle
+} from '@jupyterlab/translation';
 
 import { BaseKernel, type IKernel } from '@jupyterlite/services';
 
 // Import types from internal paths since @jupyterlite/ai doesn't export them publicly
 // TODO: Upstream should export these types from the main entry point
 import type { AgentManager, IAgentEvent } from '@jupyterlite/ai/lib/agent';
+
+import type { ToolCallStatus } from 'jupyter-chat-components';
+import { buildToolCallHtml } from 'jupyter-chat-components/lib/tool-call';
 
 import { DISPLAY_DATA_TOOL_NAME } from './tools';
 
@@ -23,11 +30,6 @@ const AI_KERNEL_PROMPT_SUFFIX = [
   '- If you use display_data, do not repeat the same payload in Markdown.',
   '- Avoid chat or sidebar UI references.'
 ].join('\n');
-
-/**
- * Tool call status type.
- */
-type ToolStatus = 'pending' | 'completed' | 'error';
 
 /**
  * Stored context for an active tool call.
@@ -68,6 +70,7 @@ export class AIKernel extends BaseKernel {
     this._agentManager = options.agentManager;
     this._providerName = options.providerName;
     this._modelName = options.modelName;
+    this._trans = nullTranslator.load('jupyterlab');
 
     // Bind event handler to this instance
     this._handleAgentEvent = this._handleAgentEvent.bind(this);
@@ -302,12 +305,14 @@ export class AIKernel extends BaseKernel {
       summary
     });
 
-    const html = Private.buildToolCallHtml({
+    const html = buildToolCallHtml({
       toolName: data.toolName,
       input: data.input,
       status: 'pending',
-      summary
-    });
+      summary,
+      trans: this._trans,
+      toolCallApproval: null
+    }).outerHTML;
 
     const text = Private.buildToolCallText({
       toolName: data.toolName,
@@ -334,34 +339,41 @@ export class AIKernel extends BaseKernel {
   private _handleToolCallComplete(data: {
     callId: string;
     toolName: string;
-    output: string;
+    outputData: unknown;
     isError: boolean;
   }): void {
     const context = this._toolContexts.get(data.callId);
+    // Support both v0.12 (output: string) and v0.13+ (outputData: unknown)
+    // since @jupyterlite/ai is a shared singleton resolved at runtime.
+    const rawOutput =
+      data.outputData ?? (data as Record<string, unknown>).output;
+    const output = Private.formatToolOutput(rawOutput);
 
     // Handle display_data tool specially - emit MIME bundle instead of tool card
-    if (data.toolName === DISPLAY_DATA_TOOL_NAME && !data.isError) {
-      this._handleDisplayDataToolComplete(data, context);
+    if (data.toolName === DISPLAY_DATA_TOOL_NAME && !data.isError && output) {
+      this._handleDisplayDataToolComplete({ ...data, output }, context);
       return;
     }
 
     if (context) {
-      const status: ToolStatus = data.isError ? 'error' : 'completed';
+      const status: ToolCallStatus = data.isError ? 'error' : 'completed';
 
-      const html = Private.buildToolCallHtml({
+      const html = buildToolCallHtml({
         toolName: context.toolName,
         input: context.input,
         status,
         summary: context.summary,
-        output: data.output
-      });
+        output,
+        trans: this._trans,
+        toolCallApproval: null
+      }).outerHTML;
 
       const text = Private.buildToolCallText({
         toolName: context.toolName,
         input: context.input,
         status,
         summary: context.summary,
-        output: data.output
+        output
       });
 
       this.updateDisplayData({
@@ -382,7 +394,7 @@ export class AIKernel extends BaseKernel {
       if (data.isError) {
         this.stream({
           name: 'stderr',
-          text: `[Tool ${data.toolName} failed: ${data.output}]\n`
+          text: `[Tool ${data.toolName} failed: ${output}]\n`
         });
       } else {
         this.stream({
@@ -430,13 +442,15 @@ export class AIKernel extends BaseKernel {
       const errorMessage = `Failed to parse display_data output (${reason})`;
 
       if (context) {
-        const html = Private.buildToolCallHtml({
+        const html = buildToolCallHtml({
           toolName: context.toolName,
           input: context.input,
           status: 'error',
           summary: context.summary,
-          output: errorMessage
-        });
+          output: errorMessage,
+          trans: this._trans,
+          toolCallApproval: null
+        }).outerHTML;
 
         const text = Private.buildToolCallText({
           toolName: context.toolName,
@@ -594,6 +608,7 @@ export class AIKernel extends BaseKernel {
   private _agentManager: AgentManager;
   private _providerName: string;
   private _modelName: string;
+  private _trans: TranslationBundle;
   private _toolContexts: Map<string, IToolCallContext> = new Map();
   private _displayIdCounter = 0;
   private _responseDisplayId: string | null = null;
@@ -639,21 +654,20 @@ export class AIKernel extends BaseKernel {
  */
 namespace Private {
   /**
-   * Escape HTML special characters to prevent XSS.
+   * Format tool output data to a string for display.
    */
-  export function escapeHtml(value: string): string {
-    if (typeof document !== 'undefined') {
-      const node = document.createElement('span');
-      node.textContent = value;
-      return node.innerHTML;
+  export function formatToolOutput(outputData: unknown): string | undefined {
+    if (outputData === undefined || outputData === null) {
+      return undefined;
     }
-    // Fallback for non-browser environments
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+    if (typeof outputData === 'string') {
+      return outputData;
+    }
+    try {
+      return JSON.stringify(outputData, null, 2);
+    } catch {
+      return '[Complex object - cannot serialize]';
+    }
   }
 
   /**
@@ -706,217 +720,36 @@ namespace Private {
   }
 
   /**
-   * CSS configuration for different tool statuses.
+   * Options for building plain text tool call output.
    */
-  const STATUS_CONFIG: Record<
-    ToolStatus,
-    { cssClass: string; statusClass: string; statusText: string }
-  > = {
-    pending: {
-      cssClass: 'jp-ai-tool-pending',
-      statusClass: 'jp-ai-tool-status-pending',
-      statusText: 'Running...'
-    },
-    completed: {
-      cssClass: 'jp-ai-tool-completed',
-      statusClass: 'jp-ai-tool-status-completed',
-      statusText: 'Completed'
-    },
-    error: {
-      cssClass: 'jp-ai-tool-error',
-      statusClass: 'jp-ai-tool-status-error',
-      statusText: 'Error'
-    }
-  };
-
-  /**
-   * Inline CSS styles for tool call display.
-   * These are embedded in the HTML to ensure proper styling in any context.
-   */
-  const TOOL_CALL_STYLES = `
-<style>
-.jp-ai-tool-call {
-  margin: 8px 0;
-  border: 1px solid var(--jp-border-color1, #e0e0e0);
-  border-radius: 6px;
-  background: var(--jp-layout-color0, #fff);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  overflow: hidden;
-  font-family: var(--jp-ui-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
-}
-.jp-ai-tool-header {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  background: var(--jp-layout-color1, #f5f5f5);
-  cursor: pointer;
-  user-select: none;
-  gap: 8px;
-}
-.jp-ai-tool-header:hover {
-  background: var(--jp-layout-color2, #eee);
-}
-.jp-ai-tool-header::marker {
-  content: '';
-}
-.jp-ai-tool-header::before {
-  content: '';
-  width: 0;
-  height: 0;
-  border-left: 5px solid var(--jp-ui-font-color2, #666);
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  transition: transform 0.2s ease;
-}
-.jp-ai-tool-call[open] .jp-ai-tool-header::before {
-  transform: rotate(90deg);
-}
-.jp-ai-tool-icon {
-  font-size: 14px;
-  opacity: 0.8;
-}
-.jp-ai-tool-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--jp-ui-font-color1, #333);
-  flex: 1;
-}
-.jp-ai-tool-summary {
-  font-weight: 400;
-  opacity: 0.7;
-  font-size: 12px;
-}
-.jp-ai-tool-summary::before {
-  content: ' ';
-  white-space: pre;
-}
-.jp-ai-tool-status {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 3px;
-}
-.jp-ai-tool-status-pending {
-  background: rgba(255, 152, 0, 0.15);
-  color: #e65100;
-}
-.jp-ai-tool-status-completed {
-  background: rgba(76, 175, 80, 0.15);
-  color: #2e7d32;
-}
-.jp-ai-tool-status-error {
-  background: rgba(244, 67, 54, 0.15);
-  color: #c62828;
-}
-.jp-ai-tool-body {
-  padding: 12px;
-}
-.jp-ai-tool-section {
-  margin-bottom: 8px;
-}
-.jp-ai-tool-section:last-child {
-  margin-bottom: 0;
-}
-.jp-ai-tool-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--jp-ui-font-color2, #666);
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.jp-ai-tool-code {
-  background: var(--jp-layout-color2, #f5f5f5);
-  border: 1px solid var(--jp-border-color1, #e0e0e0);
-  border-radius: 4px;
-  padding: 8px;
-  margin: 0;
-  font-family: var(--jp-code-font-family, 'SFMono-Regular', Consolas, monospace);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow: auto;
-  max-height: 200px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.jp-ai-tool-code code {
-  background: none;
-  padding: 0;
-  border: none;
-  font-family: inherit;
-  font-size: inherit;
-}
-.jp-ai-tool-pending {
-  border-left: 4px solid #ff9800;
-}
-.jp-ai-tool-completed {
-  border-left: 4px solid #4caf50;
-}
-.jp-ai-tool-error {
-  border-left: 4px solid #f44336;
-}
-</style>`;
-
-  /**
-   * Options for building tool call HTML.
-   */
-  interface IToolCallHtmlOptions {
+  interface IToolCallTextOptions {
     toolName: string;
     input: string;
-    status: ToolStatus;
+    status: ToolCallStatus;
     summary?: string;
     output?: string;
   }
 
   /**
-   * Builds HTML for a tool call display.
+   * Plain text status labels for each tool call status.
    */
-  export function buildToolCallHtml(options: IToolCallHtmlOptions): string {
-    const { toolName, input, status, summary, output } = options;
-    const config = STATUS_CONFIG[status];
-    const escapedToolName = escapeHtml(toolName);
-    const escapedInput = escapeHtml(input);
-    const summaryHtml = summary
-      ? `<span class="jp-ai-tool-summary">${escapeHtml(summary)}</span>`
-      : '';
-
-    let bodyContent = `
-<div class="jp-ai-tool-section">
-<div class="jp-ai-tool-label">Input</div>
-<pre class="jp-ai-tool-code"><code>${escapedInput}</code></pre>
-</div>`;
-
-    // Add output/result section if provided
-    if (output !== undefined) {
-      const escapedOutput = escapeHtml(output);
-      const label = status === 'error' ? 'Error' : 'Result';
-      bodyContent += `
-<div class="jp-ai-tool-section">
-<div class="jp-ai-tool-label">${label}</div>
-<pre class="jp-ai-tool-code"><code>${escapedOutput}</code></pre>
-</div>`;
-    }
-
-    return `${TOOL_CALL_STYLES}
-<details class="jp-ai-tool-call ${config.cssClass}">
-<summary class="jp-ai-tool-header">
-<div class="jp-ai-tool-icon">⚡</div>
-<div class="jp-ai-tool-title">${escapedToolName}${summaryHtml}</div>
-<div class="jp-ai-tool-status ${config.statusClass}">${config.statusText}</div>
-</summary>
-<div class="jp-ai-tool-body">${bodyContent}
-</div>
-</details>`;
-  }
+  const STATUS_TEXT: Record<ToolCallStatus, string> = {
+    pending: 'Running...',
+    awaiting_approval: 'Awaiting Approval',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    completed: 'Completed',
+    error: 'Error'
+  };
 
   /**
    * Build plain text fallback for tool call display.
    */
-  export function buildToolCallText(options: IToolCallHtmlOptions): string {
+  export function buildToolCallText(options: IToolCallTextOptions): string {
     const { toolName, input, status, summary, output } = options;
-    const config = STATUS_CONFIG[status];
+    const statusText = STATUS_TEXT[status];
     const summaryText = summary ? ` ${summary}` : '';
-    let text = `[Tool: ${toolName}${summaryText}] (${config.statusText})\nInput: ${input}`;
+    let text = `[Tool: ${toolName}${summaryText}] (${statusText})\nInput: ${input}`;
     if (output !== undefined) {
       const label = status === 'error' ? 'Error' : 'Result';
       text += `\n${label}: ${output}`;
