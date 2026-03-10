@@ -16,7 +16,10 @@ import { BaseKernel, type IKernel } from '@jupyterlite/services';
 // TODO: Upstream should export these types from the main entry point
 import type { AgentManager, IAgentEvent } from '@jupyterlite/ai/lib/agent';
 
-import type { ToolCallStatus } from 'jupyter-chat-components';
+import type {
+  IToolCallMetadata,
+  ToolCallStatus
+} from 'jupyter-chat-components';
 import { buildToolCallHtml } from 'jupyter-chat-components/lib/tool-call';
 
 import { DISPLAY_DATA_TOOL_NAME } from './tools';
@@ -305,14 +308,12 @@ export class AIKernel extends BaseKernel {
       summary
     });
 
-    const html = buildToolCallHtml({
+    const html = this._buildToolCallHtml({
       toolName: data.toolName,
       input: data.input,
       status: 'pending',
-      summary,
-      trans: this._trans,
-      toolCallApproval: null
-    }).outerHTML;
+      summary
+    });
 
     const text = Private.buildToolCallText({
       toolName: data.toolName,
@@ -354,15 +355,13 @@ export class AIKernel extends BaseKernel {
     if (context) {
       const status: ToolCallStatus = data.isError ? 'error' : 'completed';
 
-      const html = buildToolCallHtml({
+      const html = this._buildToolCallHtml({
         toolName: context.toolName,
         input: context.input,
         status,
         summary: context.summary,
-        output,
-        trans: this._trans,
-        toolCallApproval: null
-      }).outerHTML;
+        output
+      });
 
       const text = Private.buildToolCallText({
         toolName: context.toolName,
@@ -402,6 +401,17 @@ export class AIKernel extends BaseKernel {
   }
 
   /**
+   * Build tool call HTML string using the shared component.
+   */
+  private _buildToolCallHtml(options: IToolCallMetadata): string {
+    return buildToolCallHtml({
+      ...options,
+      trans: this._trans,
+      toolCallApproval: null
+    }).outerHTML;
+  }
+
+  /**
    * Handle tool approval requests by auto-approving in AI kernels.
    *
    * The kernel output model does not currently expose interactive approve/reject
@@ -438,15 +448,13 @@ export class AIKernel extends BaseKernel {
       const errorMessage = `Failed to parse display_data output (${reason})`;
 
       if (context) {
-        const html = buildToolCallHtml({
+        const html = this._buildToolCallHtml({
           toolName: context.toolName,
           input: context.input,
           status: 'error',
           summary: context.summary,
-          output: errorMessage,
-          trans: this._trans,
-          toolCallApproval: null
-        }).outerHTML;
+          output: errorMessage
+        });
 
         const text = Private.buildToolCallText({
           toolName: context.toolName,
