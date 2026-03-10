@@ -134,7 +134,7 @@ export class AIKernel extends BaseKernel {
     if (!this._agentManager.hasValidConfig()) {
       this.stream({
         name: 'stderr',
-        text: 'Error: AI provider not configured. Check your API key in the JupyterLite AI settings.\n'
+        text: `${this._trans.__('Error: AI provider not configured. Check your API key in the JupyterLite AI settings.')}\n`
       });
       return {
         status: 'error',
@@ -319,7 +319,8 @@ export class AIKernel extends BaseKernel {
       toolName: data.toolName,
       input: data.input,
       status: 'pending',
-      summary
+      summary,
+      trans: this._trans
     });
 
     this.displayData({
@@ -368,7 +369,8 @@ export class AIKernel extends BaseKernel {
         input: context.input,
         status,
         summary: context.summary,
-        output
+        output,
+        trans: this._trans
       });
 
       this.updateDisplayData({
@@ -389,12 +391,12 @@ export class AIKernel extends BaseKernel {
       if (data.isError) {
         this.stream({
           name: 'stderr',
-          text: `[Tool ${data.toolName} failed: ${output}]\n`
+          text: `${this._trans.__('Tool %1 failed: %2', data.toolName, output ?? '')}\n`
         });
       } else {
         this.stream({
           name: 'stdout',
-          text: `[Tool ${data.toolName} completed]\n`
+          text: `${this._trans.__('Tool %1 completed', data.toolName)}\n`
         });
       }
     }
@@ -445,7 +447,10 @@ export class AIKernel extends BaseKernel {
       metadata = parsedOutput.metadata;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      const errorMessage = `Failed to parse display_data output (${reason})`;
+      const errorMessage = this._trans.__(
+        'Failed to parse display_data output (%1)',
+        reason
+      );
 
       if (context) {
         const html = this._buildToolCallHtml({
@@ -461,7 +466,8 @@ export class AIKernel extends BaseKernel {
           input: context.input,
           status: 'error',
           summary: context.summary,
-          output: errorMessage
+          output: errorMessage,
+          trans: this._trans
         });
 
         this.updateDisplayData({
@@ -732,30 +738,42 @@ namespace Private {
     status: ToolCallStatus;
     summary?: string;
     output?: string;
+    trans: TranslationBundle;
   }
 
   /**
-   * Plain text status labels for each tool call status.
+   * Get the translated status text for a tool call status.
    */
-  const STATUS_TEXT: Record<ToolCallStatus, string> = {
-    pending: 'Running...',
-    awaiting_approval: 'Awaiting Approval',
-    approved: 'Approved',
-    rejected: 'Rejected',
-    completed: 'Completed',
-    error: 'Error'
+  const getStatusText = (
+    status: ToolCallStatus,
+    trans: TranslationBundle
+  ): string => {
+    switch (status) {
+      case 'pending':
+        return trans.__('Running...');
+      case 'awaiting_approval':
+        return trans.__('Awaiting Approval');
+      case 'approved':
+        return trans.__('Approved');
+      case 'rejected':
+        return trans.__('Rejected');
+      case 'completed':
+        return trans.__('Completed');
+      case 'error':
+        return trans.__('Error');
+    }
   };
 
   /**
    * Build plain text fallback for tool call display.
    */
   export function buildToolCallText(options: IToolCallTextOptions): string {
-    const { toolName, input, status, summary, output } = options;
-    const statusText = STATUS_TEXT[status];
+    const { toolName, input, status, summary, output, trans } = options;
+    const statusText = getStatusText(status, trans);
     const summaryText = summary ? ` ${summary}` : '';
-    let text = `[Tool: ${toolName}${summaryText}] (${statusText})\nInput: ${input}`;
+    let text = `[${trans.__('Tool: %1', toolName)}${summaryText}] (${statusText})\n${trans.__('Input')}: ${input}`;
     if (output !== undefined) {
-      const label = status === 'error' ? 'Error' : 'Result';
+      const label = status === 'error' ? trans.__('Error') : trans.__('Result');
       text += `\n${label}: ${output}`;
     }
     return text;
