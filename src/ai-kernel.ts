@@ -343,11 +343,7 @@ export class AIKernel extends BaseKernel {
     isError: boolean;
   }): void {
     const context = this._toolContexts.get(data.callId);
-    // Support both v0.12 (output: string) and v0.13+ (outputData: unknown)
-    // since @jupyterlite/ai is a shared singleton resolved at runtime.
-    const rawOutput =
-      data.outputData ?? (data as Record<string, unknown>).output;
-    const output = Private.formatToolOutput(rawOutput);
+    const output = Private.formatToolOutput(data.outputData);
 
     // Handle display_data tool specially - emit MIME bundle instead of tool card
     if (data.toolName === DISPLAY_DATA_TOOL_NAME && !data.isError && output) {
