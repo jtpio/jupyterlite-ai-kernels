@@ -153,7 +153,8 @@ export class AIKernelManager {
           settingsModel: this._settingsModel,
           providerRegistry: this._providerRegistry,
           toolRegistry: this._toolRegistry,
-          activeProvider: provider.id
+          activeProvider: provider.id,
+          renderMimeRegistry: this._renderMimeRegistry
         });
 
         return new AIKernel({

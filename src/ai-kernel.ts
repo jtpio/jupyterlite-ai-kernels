@@ -24,16 +24,6 @@ import { buildToolCallHtml } from 'jupyter-chat-components/lib/tool-call';
 
 import { DISPLAY_DATA_TOOL_NAME } from './tools';
 
-const AI_KERNEL_PROMPT_SUFFIX = [
-  '---',
-  'AI kernel context:',
-  '- You are responding in a JupyterLab AI kernel cell output.',
-  '- Output appears as cell output; respond in Markdown.',
-  '- Use the display_data tool to emit rich MIME outputs when helpful.',
-  '- If you use display_data, do not repeat the same payload in Markdown.',
-  '- Avoid chat or sidebar UI references.'
-].join('\n');
-
 /**
  * Stored context for an active tool call.
  */
@@ -149,10 +139,8 @@ export class AIKernel extends BaseKernel {
       // Connect to streaming events
       this._agentManager.agentEvent.connect(this._handleAgentEvent, this);
 
-      const prompt = `${code}\n\n${AI_KERNEL_PROMPT_SUFFIX}`;
-
       // Generate the response
-      await this._agentManager.generateResponse(prompt);
+      await this._agentManager.generateResponse(code);
 
       if (this._executionErrorMessage) {
         return {
