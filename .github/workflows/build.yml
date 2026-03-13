@@ -19,11 +19,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Base Setup
-      uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
-
-    - uses: pnpm/action-setup@v4
-      with:
-        version: 10.28.0
+      uses: jtpio/maintainer-tools/.github/actions/base-setup@pnpm
 
     - name: Install dependencies
       run: python -m pip install -U "jupyterlab>=4.0.0,<5"
@@ -96,5 +92,5 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - uses: jtpio/maintainer-tools/.github/actions/base-setup@pnpm
       - uses: jupyterlab/maintainer-tools/.github/actions/check-links@v1
