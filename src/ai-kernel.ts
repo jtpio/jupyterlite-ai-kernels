@@ -1,6 +1,8 @@
 // Copyright (c) JupyterLite Contributors
 // Distributed under the terms of the Modified BSD License.
 
+import { NoOutputGeneratedError } from 'ai';
+
 import type { PartialJSONObject } from '@lumino/coreutils';
 
 import type { KernelMessage } from '@jupyterlab/services';
@@ -32,6 +34,7 @@ interface IToolCallContext {
   toolName: string;
   input: string;
   summary: string;
+  approvalId?: string;
 }
 
 /**
@@ -190,6 +193,15 @@ export class AIKernel extends BaseKernel {
         this._handleMessageChunk(event.data.chunk);
         break;
       case 'error':
+        if (
+          Private.shouldIgnoreNoOutputGeneratedError(
+            event.data.error,
+            this._awaitingPostToolResponse
+          )
+        ) {
+          this._awaitingPostToolResponse = false;
+          break;
+        }
         if (!this._executionErrorMessage) {
           this._executionErrorMessage = event.data.error.message;
         }
@@ -207,6 +219,9 @@ export class AIKernel extends BaseKernel {
       case 'tool_approval_request':
         this._handleToolApprovalRequest(event.data);
         break;
+      case 'tool_approval_resolved':
+        this._handleToolApprovalResolved(event.data);
+        break;
     }
   }
 
@@ -214,6 +229,8 @@ export class AIKernel extends BaseKernel {
    * Handle a message chunk by updating the markdown display.
    */
   private _handleMessageChunk(chunk: string): void {
+    this._awaitingPostToolResponse = false;
+
     // Suppress markdown echoes when a display_data output already rendered rich content.
     if (this._suppressPostDisplayDataText) {
       return;
@@ -276,6 +293,8 @@ export class AIKernel extends BaseKernel {
     toolName: string;
     input: string;
   }): void {
+    this._awaitingPostToolResponse = false;
+
     // Finalize and reset any buffered post-display_data text before starting a new tool card.
     this._flushPostDisplayDataTextBuffer();
     this._resetPostDisplayDataTextState();
@@ -332,6 +351,8 @@ export class AIKernel extends BaseKernel {
     outputData: unknown;
     isError: boolean;
   }): void {
+    this._awaitingPostToolResponse = true;
+
     const context = this._toolContexts.get(data.callId);
     const output = Private.formatToolOutput(data.outputData);
 
@@ -405,13 +426,103 @@ export class AIKernel extends BaseKernel {
    * Handle tool approval requests by auto-approving in AI kernels.
    *
    * The kernel output model does not currently expose interactive approve/reject
-   * controls, so we resolve approval requests immediately to avoid hanging.
+   * controls, so we resolve approval requests automatically to avoid hanging.
    */
-  private _handleToolApprovalRequest(data: { approvalId: string }): void {
-    this._agentManager.approveToolCall(
-      data.approvalId,
-      'Auto-approved in AI kernel'
+  private _handleToolApprovalRequest(data: {
+    approvalId: string;
+    toolCallId: string;
+  }): void {
+    const context = this._toolContexts.get(data.toolCallId);
+    if (context) {
+      context.approvalId = data.approvalId;
+
+      const html = this._buildToolCallHtml({
+        toolName: context.toolName,
+        input: context.input,
+        status: 'awaiting_approval',
+        summary: context.summary,
+        approvalId: data.approvalId
+      });
+
+      const text = Private.buildToolCallText({
+        toolName: context.toolName,
+        input: context.input,
+        status: 'awaiting_approval',
+        summary: context.summary,
+        trans: this._trans
+      });
+
+      this.updateDisplayData({
+        data: {
+          'text/html': html,
+          'text/plain': text
+        },
+        metadata: {},
+        transient: {
+          display_id: context.displayId
+        }
+      });
+    }
+
+    // The upstream agent emits the approval request event before it stores the
+    // pending approval. Resolve on the next microtask so the approval is not
+    // dropped and the agent does not wait forever.
+    void Promise.resolve().then(() => {
+      this._agentManager.approveToolCall(
+        data.approvalId,
+        'Auto-approved in AI kernel'
+      );
+    });
+  }
+
+  /**
+   * Handle tool approval resolution by updating the display state.
+   */
+  private _handleToolApprovalResolved(data: {
+    approvalId: string;
+    approved: boolean;
+  }): void {
+    const contextEntry = Array.from(this._toolContexts.entries()).find(
+      ([, item]) => item.approvalId === data.approvalId
     );
+    const [callId, context] = contextEntry ?? [];
+
+    if (!context) {
+      return;
+    }
+
+    const status: ToolCallStatus = data.approved ? 'approved' : 'rejected';
+
+    const html = this._buildToolCallHtml({
+      toolName: context.toolName,
+      input: context.input,
+      status,
+      summary: context.summary,
+      approvalId: context.approvalId
+    });
+
+    const text = Private.buildToolCallText({
+      toolName: context.toolName,
+      input: context.input,
+      status,
+      summary: context.summary,
+      trans: this._trans
+    });
+
+    this.updateDisplayData({
+      data: {
+        'text/html': html,
+        'text/plain': text
+      },
+      metadata: {},
+      transient: {
+        display_id: context.displayId
+      }
+    });
+
+    if (!data.approved && callId) {
+      this._toolContexts.delete(callId);
+    }
   }
 
   /**
@@ -615,6 +726,7 @@ export class AIKernel extends BaseKernel {
   private _bufferPostDisplayDataText = false;
   private _suppressPostDisplayDataText = false;
   private _postDisplayDataTextBuffer = '';
+  private _awaitingPostToolResponse = false;
 
   private _flushPostDisplayDataTextBuffer(): void {
     if (!this._bufferPostDisplayDataText) {
@@ -643,6 +755,7 @@ export class AIKernel extends BaseKernel {
     this._responseContent = '';
     this._executionErrorMessage = null;
     this._resetPostDisplayDataTextState();
+    this._awaitingPostToolResponse = false;
     this._toolContexts.clear();
   }
 }
@@ -787,6 +900,15 @@ namespace Private {
     }
 
     return /\n\s*[[{]\s*\n\s*"[^"]+"\s*:/.test(value);
+  }
+
+  export function shouldIgnoreNoOutputGeneratedError(
+    error: Error,
+    awaitingPostToolResponse: boolean
+  ): boolean {
+    return (
+      awaitingPostToolResponse && NoOutputGeneratedError.isInstance(error)
+    );
   }
 
   interface IParsedDisplayDataToolOutput {
