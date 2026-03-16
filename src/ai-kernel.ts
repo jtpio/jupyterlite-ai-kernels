@@ -906,9 +906,7 @@ namespace Private {
     error: Error,
     awaitingPostToolResponse: boolean
   ): boolean {
-    return (
-      awaitingPostToolResponse && NoOutputGeneratedError.isInstance(error)
-    );
+    return awaitingPostToolResponse && NoOutputGeneratedError.isInstance(error);
   }
 
   interface IParsedDisplayDataToolOutput {
