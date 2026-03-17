@@ -59,9 +59,9 @@
         "@jupyterlab/rendermime": "^4.5.5",
         "@jupyterlab/services": "^7.5.5",
         "@jupyterlab/translation": "^4.5.5",
-        "@jupyterlite/ai": "^0.13.0",
+        "@jupyterlite/ai": "^0.14.0",
         "@jupyterlite/services": "^0.7.0",
-        "ai": "^6.0.90",
+        "ai": "^6.0.108",
         "jupyter-chat-components": "^0.1.2",
         "zod": "^4.3.6"
     },
