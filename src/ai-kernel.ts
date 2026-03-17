@@ -932,7 +932,9 @@ namespace Private {
   export function toKernelDisplayContent(
     output: IDisplayOutput
   ): IKernelDisplayContent | null {
-    const mimeBundle = normalizeMimeBundle(output.data as Record<string, unknown>);
+    const mimeBundle = normalizeMimeBundle(
+      output.data as Record<string, unknown>
+    );
     if (!Object.keys(mimeBundle).length) {
       return null;
     }
