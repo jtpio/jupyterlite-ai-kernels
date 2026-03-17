@@ -1,8 +1,6 @@
 // Copyright (c) JupyterLite Contributors
 // Distributed under the terms of the Modified BSD License.
 
-import { NoOutputGeneratedError } from 'ai';
-
 import type { PartialJSONObject } from '@lumino/coreutils';
 
 import type { KernelMessage } from '@jupyterlab/services';
@@ -193,15 +191,6 @@ export class AIKernel extends BaseKernel {
         this._handleMessageChunk(event.data.chunk);
         break;
       case 'error':
-        if (
-          Private.shouldIgnoreNoOutputGeneratedError(
-            event.data.error,
-            this._awaitingPostToolResponse
-          )
-        ) {
-          this._awaitingPostToolResponse = false;
-          break;
-        }
         if (!this._executionErrorMessage) {
           this._executionErrorMessage = event.data.error.message;
         }
@@ -229,8 +218,6 @@ export class AIKernel extends BaseKernel {
    * Handle a message chunk by updating the markdown display.
    */
   private _handleMessageChunk(chunk: string): void {
-    this._awaitingPostToolResponse = false;
-
     // Suppress markdown echoes when a display_data output already rendered rich content.
     if (this._suppressPostDisplayDataText) {
       return;
@@ -293,8 +280,6 @@ export class AIKernel extends BaseKernel {
     toolName: string;
     input: string;
   }): void {
-    this._awaitingPostToolResponse = false;
-
     // Finalize and reset any buffered post-display_data text before starting a new tool card.
     this._flushPostDisplayDataTextBuffer();
     this._resetPostDisplayDataTextState();
@@ -351,8 +336,6 @@ export class AIKernel extends BaseKernel {
     outputData: unknown;
     isError: boolean;
   }): void {
-    this._awaitingPostToolResponse = true;
-
     const context = this._toolContexts.get(data.callId);
     const output = Private.formatToolOutput(data.outputData);
 
@@ -726,7 +709,6 @@ export class AIKernel extends BaseKernel {
   private _bufferPostDisplayDataText = false;
   private _suppressPostDisplayDataText = false;
   private _postDisplayDataTextBuffer = '';
-  private _awaitingPostToolResponse = false;
 
   private _flushPostDisplayDataTextBuffer(): void {
     if (!this._bufferPostDisplayDataText) {
@@ -755,7 +737,6 @@ export class AIKernel extends BaseKernel {
     this._responseContent = '';
     this._executionErrorMessage = null;
     this._resetPostDisplayDataTextState();
-    this._awaitingPostToolResponse = false;
     this._toolContexts.clear();
   }
 }
@@ -900,13 +881,6 @@ namespace Private {
     }
 
     return /\n\s*[[{]\s*\n\s*"[^"]+"\s*:/.test(value);
-  }
-
-  export function shouldIgnoreNoOutputGeneratedError(
-    error: Error,
-    awaitingPostToolResponse: boolean
-  ): boolean {
-    return awaitingPostToolResponse && NoOutputGeneratedError.isInstance(error);
   }
 
   interface IParsedDisplayDataToolOutput {
