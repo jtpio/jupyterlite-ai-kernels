@@ -1,8 +1,6 @@
 // Copyright (c) JupyterLite Contributors
 // Distributed under the terms of the Modified BSD License.
 
-import { NoOutputGeneratedError } from 'ai';
-
 import type { PartialJSONObject } from '@lumino/coreutils';
 
 import type { KernelMessage } from '@jupyterlab/services';
@@ -193,15 +191,6 @@ export class AIKernel extends BaseKernel {
         this._handleMessageChunk(event.data.chunk);
         break;
       case 'error':
-        if (
-          Private.shouldIgnoreNoOutputGeneratedError(
-            event.data.error,
-            this._awaitingPostToolResponse
-          )
-        ) {
-          this._awaitingPostToolResponse = false;
-          break;
-        }
         if (!this._executionErrorMessage) {
           this._executionErrorMessage = event.data.error.message;
         }
@@ -229,8 +218,6 @@ export class AIKernel extends BaseKernel {
    * Handle a message chunk by updating the markdown display.
    */
   private _handleMessageChunk(chunk: string): void {
-    this._awaitingPostToolResponse = false;
-
     // Suppress markdown echoes when a display_data output already rendered rich content.
     if (this._suppressPostDisplayDataText) {
       return;
@@ -293,8 +280,6 @@ export class AIKernel extends BaseKernel {
     toolName: string;
     input: string;
   }): void {
-    this._awaitingPostToolResponse = false;
-
     // Finalize and reset any buffered post-display_data text before starting a new tool card.
     this._flushPostDisplayDataTextBuffer();
     this._resetPostDisplayDataTextState();
@@ -351,10 +336,12 @@ export class AIKernel extends BaseKernel {
     outputData: unknown;
     isError: boolean;
   }): void {
-    this._awaitingPostToolResponse = true;
-
     const context = this._toolContexts.get(data.callId);
     const output = Private.formatToolOutput(data.outputData);
+    const displayOutputs =
+      !data.isError && data.toolName === 'execute_command'
+        ? Private.extractDisplayOutputsFromUnknown(data.outputData)
+        : [];
 
     // Handle display_data tool specially - emit MIME bundle instead of tool card
     if (data.toolName === DISPLAY_DATA_TOOL_NAME && !data.isError && output) {
@@ -408,6 +395,10 @@ export class AIKernel extends BaseKernel {
           text: `${this._trans.__('Tool %1 completed', data.toolName)}\n`
         });
       }
+    }
+
+    if (displayOutputs.length > 0) {
+      this._emitDisplayOutputs(displayOutputs);
     }
   }
 
@@ -619,6 +610,45 @@ export class AIKernel extends BaseKernel {
   }
 
   /**
+   * Emit notebook-friendly display messages for rich command outputs.
+   */
+  private _emitDisplayOutputs(outputs: Private.IDisplayOutput[]): void {
+    let emittedDisplay = false;
+
+    for (const output of outputs) {
+      const content = Private.toKernelDisplayContent(output);
+      if (!content) {
+        continue;
+      }
+
+      const { shouldUpdate, ...displayContent } = content;
+      const displayId =
+        displayContent.transient &&
+        typeof displayContent.transient.display_id === 'string'
+          ? displayContent.transient.display_id
+          : null;
+
+      if (shouldUpdate && displayId) {
+        this.updateDisplayData({
+          ...displayContent,
+          transient: { display_id: displayId }
+        });
+      } else {
+        this.displayData(displayContent);
+      }
+
+      emittedDisplay = true;
+    }
+
+    if (emittedDisplay) {
+      // Buffer any follow-up text so raw payload echoes can be suppressed.
+      this._bufferPostDisplayDataText = true;
+      this._suppressPostDisplayDataText = false;
+      this._postDisplayDataTextBuffer = '';
+    }
+  }
+
+  /**
    * Handle a complete_request message.
    *
    * @param content The content of the request.
@@ -726,7 +756,6 @@ export class AIKernel extends BaseKernel {
   private _bufferPostDisplayDataText = false;
   private _suppressPostDisplayDataText = false;
   private _postDisplayDataTextBuffer = '';
-  private _awaitingPostToolResponse = false;
 
   private _flushPostDisplayDataTextBuffer(): void {
     if (!this._bufferPostDisplayDataText) {
@@ -755,7 +784,6 @@ export class AIKernel extends BaseKernel {
     this._responseContent = '';
     this._executionErrorMessage = null;
     this._resetPostDisplayDataTextState();
-    this._awaitingPostToolResponse = false;
     this._toolContexts.clear();
   }
 }
@@ -764,6 +792,18 @@ export class AIKernel extends BaseKernel {
  * Namespace for private helper functions.
  */
 namespace Private {
+  export type IDisplayOutput =
+    | nbformat.IDisplayData
+    | nbformat.IDisplayUpdate
+    | nbformat.IExecuteResult;
+
+  interface IKernelDisplayContent {
+    data: nbformat.IMimeBundle;
+    metadata: PartialJSONObject;
+    transient?: PartialJSONObject;
+    shouldUpdate: boolean;
+  }
+
   /**
    * Format tool output data to a string for display.
    */
@@ -881,6 +921,40 @@ namespace Private {
   }
 
   /**
+   * Normalize arbitrary tool payloads into display outputs returned by commands.
+   */
+  export function extractDisplayOutputsFromUnknown(
+    content: unknown
+  ): IDisplayOutput[] {
+    return toDisplayOutputs(content);
+  }
+
+  export function toKernelDisplayContent(
+    output: IDisplayOutput
+  ): IKernelDisplayContent | null {
+    const mimeBundle = normalizeMimeBundle(
+      output.data as Record<string, unknown>
+    );
+    if (!Object.keys(mimeBundle).length) {
+      return null;
+    }
+
+    const transient =
+      'transient' in output && isPlainObject(output.transient)
+        ? (output.transient as PartialJSONObject)
+        : undefined;
+
+    return {
+      data: mimeBundle,
+      metadata: isPlainObject(output.metadata)
+        ? (output.metadata as PartialJSONObject)
+        : {},
+      ...(transient ? { transient } : {}),
+      shouldUpdate: output.output_type === 'update_display_data'
+    };
+  }
+
+  /**
    * Detect when post-display_data markdown appears to repeat raw payload content.
    */
   export function shouldSuppressPostDisplayDataText(value: string): boolean {
@@ -900,13 +974,6 @@ namespace Private {
     }
 
     return /\n\s*[[{]\s*\n\s*"[^"]+"\s*:/.test(value);
-  }
-
-  export function shouldIgnoreNoOutputGeneratedError(
-    error: Error,
-    awaitingPostToolResponse: boolean
-  ): boolean {
-    return awaitingPostToolResponse && NoOutputGeneratedError.isInstance(error);
   }
 
   interface IParsedDisplayDataToolOutput {
@@ -961,6 +1028,45 @@ namespace Private {
       metadata
     };
   }
+
+  const isDisplayOutput = (value: unknown): value is IDisplayOutput => {
+    if (!isPlainObject(value) || !isPlainObject(value.data)) {
+      return false;
+    }
+
+    switch (value.output_type) {
+      case 'display_data':
+      case 'update_display_data':
+      case 'execute_result':
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const toDisplayOutputs = (value: unknown): IDisplayOutput[] => {
+    if (isDisplayOutput(value)) {
+      return [value];
+    }
+
+    if (Array.isArray(value)) {
+      return value.filter(isDisplayOutput);
+    }
+
+    if (!isPlainObject(value)) {
+      return [];
+    }
+
+    if (Array.isArray(value.outputs)) {
+      return value.outputs.filter(isDisplayOutput);
+    }
+
+    if ('result' in value) {
+      return toDisplayOutputs(value.result);
+    }
+
+    return [];
+  };
 
   const createSingleMimeBundle = (
     mimeType: string,
