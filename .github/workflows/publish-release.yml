@@ -22,6 +22,7 @@ jobs:
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
         with:
           node_version: '24'
+          pnpm_version: '10'
 
       - uses: actions/create-github-app-token@v1
         id: app-token
