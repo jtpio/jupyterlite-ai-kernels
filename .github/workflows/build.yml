@@ -20,10 +20,8 @@ jobs:
 
     - name: Base Setup
       uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
-
-    - uses: pnpm/action-setup@v4
       with:
-        version: 10.28.0
+        pnpm_version: '10'
 
     - name: Install dependencies
       run: python -m pip install -U "jupyterlab>=4.0.0,<5"
@@ -97,4 +95,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+        with:
+          pnpm_version: '10'
       - uses: jupyterlab/maintainer-tools/.github/actions/check-links@v1
