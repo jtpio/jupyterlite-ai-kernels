@@ -5,28 +5,18 @@ import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 
 import type { IKernel, IKernelSpecs } from '@jupyterlite/services';
 
-import type { IProviderRegistry, ITool, IToolRegistry } from '@jupyterlite/ai';
-
-import { AI_AVATAR } from './icons';
-
-// Import types from internal paths since @jupyterlite/ai doesn't export them publicly
-// TODO: Upstream should export these types from the main entry point
-import type { AISettingsModel } from '@jupyterlite/ai/lib/models/settings-model';
-import type { AgentManagerFactory } from '@jupyterlite/ai/lib/agent';
-import { ToolRegistry } from '@jupyterlite/ai/lib/tools/tool-registry';
+import {
+  AI_AVATAR,
+  ToolRegistry,
+  type IAISettingsModel,
+  type IAgentManagerFactory,
+  type IProviderConfig,
+  type IProviderRegistry,
+  type IToolRegistry
+} from '@jupyternaut/agent';
 
 import { AIKernel } from './ai-kernel';
 import { createDisplayDataTool, DISPLAY_DATA_TOOL_NAME } from './tools';
-
-/**
- * Interface for provider configuration (matching @jupyterlite/ai's IProviderConfig)
- */
-interface IProviderConfig {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-}
 
 /**
  * Options for creating the AIKernelManager.
@@ -40,12 +30,12 @@ export interface IAIKernelManagerOptions {
   /**
    * The AI settings model.
    */
-  settingsModel: AISettingsModel;
+  settingsModel: IAISettingsModel;
 
   /**
    * The agent manager factory.
    */
-  agentManagerFactory: AgentManagerFactory;
+  agentManagerFactory: IAgentManagerFactory;
 
   /**
    * The provider registry.
@@ -75,21 +65,7 @@ export class AIKernelManager {
     this._toolRegistry = options.toolRegistry;
     this._renderMimeRegistry = options.renderMimeRegistry;
 
-    // Register the display_data tool if tool registry is available
-    // NOTE: This tool may be upstreamed to @jupyterlite/ai in the future
-    if (this._toolRegistry) {
-      // Get available MIME types from the registry if available
-      const mimeTypes = this._renderMimeRegistry?.mimeTypes;
-      this._toolRegistry.add(
-        DISPLAY_DATA_TOOL_NAME,
-        createDisplayDataTool(mimeTypes)
-      );
-    }
-
-    // Register kernels for existing providers
     this._registerKernelsForProviders();
-
-    // Listen for settings changes to register new providers
     this._settingsModel.stateChanged.connect(this._onSettingsChanged, this);
   }
 
@@ -104,15 +80,7 @@ export class AIKernelManager {
    * Register kernels for all configured providers.
    */
   private _registerKernelsForProviders(): void {
-    const providers = this._settingsModel.config.providers;
-    if (!Array.isArray(providers)) {
-      return;
-    }
-
-    for (const provider of providers) {
-      if (!Private.isProviderConfig(provider)) {
-        continue;
-      }
+    for (const provider of this._settingsModel.providers) {
       this._registerKernelForProvider(provider);
     }
   }
@@ -126,15 +94,12 @@ export class AIKernelManager {
     }
 
     const kernelName = `ai-${provider.id}`;
-    const signature = Private.providerSignature(provider);
+    const signature = `${provider.id}::${provider.name}::${provider.model}`;
     const previousSignature = this._registeredKernelSignatures.get(kernelName);
-
-    // Skip if there is no effective provider metadata change
     if (previousSignature === signature) {
       return;
     }
 
-    // Build a more descriptive display name
     const displayName = `AI: ${provider.name} (${provider.model})`;
 
     this._kernelSpecs.register({
@@ -149,16 +114,10 @@ export class AIKernelManager {
         }
       },
       create: async (options: IKernel.IOptions): Promise<IKernel> => {
-        const toolRegistry = Private.createKernelToolRegistry({
-          source: this._toolRegistry,
-          renderMimeRegistry: this._renderMimeRegistry
-        });
-
-        // Create a new agent manager for this kernel instance
         const agentManager = this._agentManagerFactory.createAgent({
           settingsModel: this._settingsModel,
           providerRegistry: this._providerRegistry,
-          toolRegistry,
+          toolRegistry: this._createKernelToolRegistry(),
           activeProvider: provider.id,
           renderMimeRegistry: this._renderMimeRegistry
         });
@@ -181,6 +140,23 @@ export class AIKernelManager {
   }
 
   /**
+   * Create a tool registry with the shared tools plus the kernel-only tools.
+   */
+  private _createKernelToolRegistry(): IToolRegistry {
+    const registry = new ToolRegistry();
+    for (const [name, tool] of Object.entries(
+      this._toolRegistry?.tools ?? {}
+    )) {
+      registry.add(name, tool);
+    }
+    registry.add(
+      DISPLAY_DATA_TOOL_NAME,
+      createDisplayDataTool(this._renderMimeRegistry?.mimeTypes)
+    );
+    return registry;
+  }
+
+  /**
    * Handle settings changes to register new providers.
    */
   private _onSettingsChanged(): void {
@@ -188,60 +164,10 @@ export class AIKernelManager {
   }
 
   private _kernelSpecs: IKernelSpecs;
-  private _settingsModel: AISettingsModel;
-  private _agentManagerFactory: AgentManagerFactory;
+  private _settingsModel: IAISettingsModel;
+  private _agentManagerFactory: IAgentManagerFactory;
   private _providerRegistry?: IProviderRegistry;
   private _toolRegistry?: IToolRegistry;
   private _renderMimeRegistry?: IRenderMimeRegistry;
   private _registeredKernelSignatures = new Map<string, string>();
-}
-
-namespace Private {
-  interface ICreateKernelToolRegistryOptions {
-    source?: IToolRegistry;
-    renderMimeRegistry?: IRenderMimeRegistry;
-  }
-
-  export function isProviderConfig(value: unknown): value is IProviderConfig {
-    if (!value || typeof value !== 'object') {
-      return false;
-    }
-
-    const candidate = value as Partial<IProviderConfig>;
-    return (
-      typeof candidate.id === 'string' &&
-      typeof candidate.name === 'string' &&
-      typeof candidate.provider === 'string' &&
-      typeof candidate.model === 'string'
-    );
-  }
-
-  export function providerSignature(provider: IProviderConfig): string {
-    return `${provider.id}::${provider.name}::${provider.model}`;
-  }
-
-  export function createKernelToolRegistry(
-    options: ICreateKernelToolRegistryOptions
-  ): IToolRegistry {
-    const registry = new ToolRegistry();
-    const sourceTools = options.source?.tools ?? {};
-
-    for (const [name, tool] of Object.entries(sourceTools)) {
-      registry.add(name, disableToolApproval(tool));
-    }
-
-    const mimeTypes = options.renderMimeRegistry?.mimeTypes;
-    registry.add(DISPLAY_DATA_TOOL_NAME, createDisplayDataTool(mimeTypes));
-
-    return registry;
-  }
-
-  export function disableToolApproval(tool: ITool): ITool {
-    return {
-      ...tool,
-      // AI kernels do not expose approve/reject controls, so commands should
-      // execute directly instead of entering the approval state machine.
-      needsApproval: false
-    };
-  }
 }

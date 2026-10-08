@@ -15,13 +15,10 @@ import {
   IAgentManagerFactory,
   IProviderRegistry,
   IToolRegistry
-} from '@jupyterlite/ai';
+} from '@jupyternaut/agent';
 
-// Import types from internal paths since @jupyterlite/ai doesn't export them publicly
-// TODO: Upstream should export these types from the main entry point
-import type { AISettingsModel } from '@jupyterlite/ai/lib/models/settings-model';
-import type { AgentManagerFactory } from '@jupyterlite/ai/lib/agent';
-
+// Kernel specs must be registered at activation for the launcher to list them.
+// eslint-disable-next-line jupyter/prefer-lazy-imports
 import { AIKernelManager } from './kernel-manager';
 
 /**
@@ -29,31 +26,28 @@ import { AIKernelManager } from './kernel-manager';
  */
 const aiKernelsPlugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlite-ai-kernels:plugin',
+  description: 'Registers one AI kernel per configured AI provider.',
   autoStart: true,
-  // Cast tokens to work around portal-based type mismatches with @lumino/coreutils
-  requires: [IKernelSpecs, IAISettingsModel, IAgentManagerFactory] as any,
-  optional: [IProviderRegistry, IToolRegistry, IRenderMimeRegistry] as any,
+  requires: [IKernelSpecs, IAISettingsModel, IAgentManagerFactory],
+  optional: [IProviderRegistry, IToolRegistry, IRenderMimeRegistry],
   activate: (
     app: JupyterFrontEnd,
     kernelSpecs: IKernelSpecs,
-    settingsModel: AISettingsModel,
-    agentManagerFactory: AgentManagerFactory,
-    providerRegistry?: IProviderRegistry,
-    toolRegistry?: IToolRegistry,
-    renderMimeRegistry?: IRenderMimeRegistry
+    settingsModel: IAISettingsModel,
+    agentManagerFactory: IAgentManagerFactory,
+    providerRegistry: IProviderRegistry | null,
+    toolRegistry: IToolRegistry | null,
+    renderMimeRegistry: IRenderMimeRegistry | null
   ) => {
-    const manager = new AIKernelManager({
+    new AIKernelManager({
       kernelSpecs,
       settingsModel,
       agentManagerFactory,
-      providerRegistry,
-      toolRegistry,
-      renderMimeRegistry
+      providerRegistry: providerRegistry ?? undefined,
+      toolRegistry: toolRegistry ?? undefined,
+      renderMimeRegistry: renderMimeRegistry ?? undefined
     });
-    console.log('AI Kernels extension activated', manager);
   }
 };
 
-const plugins: JupyterFrontEndPlugin<any>[] = [aiKernelsPlugin];
-
-export default plugins;
+export default [aiKernelsPlugin];
