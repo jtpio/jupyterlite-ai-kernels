@@ -12,27 +12,32 @@ import {
 
 import { BaseKernel, type IKernel } from '@jupyterlite/services';
 
-// Import types from internal paths since @jupyterlite/ai doesn't export them publicly
-// TODO: Upstream should export these types from the main entry point
-import type { AgentManager, IAgentEvent } from '@jupyterlite/ai/lib/agent';
+import type { IAgentManager } from '@jupyternaut/agent';
 
-import type {
-  IToolCallMetadata,
-  ToolCallStatus
-} from 'jupyter-chat-components';
-import { buildToolCallHtml } from 'jupyter-chat-components/lib/tool-call';
+import type { IToolCallsEntry } from 'jupyter-chat-components';
 
 import { DISPLAY_DATA_TOOL_NAME } from './tools';
+
+/**
+ * The MIME type rendered by the jupyter-chat-components renderer.
+ */
+const CHAT_COMPONENTS_MIME_TYPE = 'application/vnd.jupyter.chat.components';
+
+/**
+ * Tool call status, as understood by the grouped tool calls component.
+ */
+type ToolCallStatus = 'in_progress' | 'completed' | 'failed';
 
 /**
  * Stored context for an active tool call.
  */
 interface IToolCallContext {
+  callId: string;
   displayId: string;
   toolName: string;
+  title?: string;
   input: string;
   summary: string;
-  approvalId?: string;
 }
 
 /**
@@ -42,7 +47,7 @@ export interface IAIKernelOptions extends IKernel.IOptions {
   /**
    * The agent manager to use for generating responses.
    */
-  agentManager: AgentManager;
+  agentManager: IAgentManager;
 
   /**
    * The display name of the provider.
@@ -185,7 +190,10 @@ export class AIKernel extends BaseKernel {
   /**
    * Handle agent events (streaming chunks and errors).
    */
-  private _handleAgentEvent(sender: AgentManager, event: IAgentEvent): void {
+  private _handleAgentEvent(
+    sender: IAgentManager,
+    event: IAgentManager.IAgentEvent
+  ): void {
     switch (event.type) {
       case 'message_chunk':
         this._handleMessageChunk(event.data.chunk);
@@ -273,13 +281,11 @@ export class AIKernel extends BaseKernel {
   }
 
   /**
-   * Handle tool call start event by displaying a rich HTML card.
+   * Handle tool call start event by displaying a tool call card.
    */
-  private _handleToolCallStart(data: {
-    callId: string;
-    toolName: string;
-    input: string;
-  }): void {
+  private _handleToolCallStart(
+    data: IAgentManager.IAgentEventTypeMap['tool_call_start']
+  ): void {
     // Finalize and reset any buffered post-display_data text before starting a new tool card.
     this._flushPostDisplayDataTextBuffer();
     this._resetPostDisplayDataTextState();
@@ -289,53 +295,24 @@ export class AIKernel extends BaseKernel {
     this._responseDisplayId = null;
     this._responseContent = '';
 
-    const displayId = `tool-call-${this._displayIdCounter++}`;
-    const summary = Private.extractToolSummary(data.toolName, data.input);
-
-    // Store the context for later update
-    this._toolContexts.set(data.callId, {
-      displayId,
+    const context: IToolCallContext = {
+      callId: data.callId,
+      displayId: `tool-call-${this._displayIdCounter++}`,
       toolName: data.toolName,
+      title: data.title,
       input: data.input,
-      summary
-    });
-
-    const html = this._buildToolCallHtml({
-      toolName: data.toolName,
-      input: data.input,
-      status: 'pending',
-      summary
-    });
-
-    const text = Private.buildToolCallText({
-      toolName: data.toolName,
-      input: data.input,
-      status: 'pending',
-      summary,
-      trans: this._trans
-    });
-
-    this.displayData({
-      data: {
-        'text/html': html,
-        'text/plain': text
-      },
-      metadata: {},
-      transient: {
-        display_id: displayId
-      }
-    });
+      summary: Private.extractToolSummary(data.toolName, data.input)
+    };
+    this._toolContexts.set(data.callId, context);
+    this.displayData(this._toolCallContent(context, 'in_progress'));
   }
 
   /**
    * Handle tool call complete event by updating the display.
    */
-  private _handleToolCallComplete(data: {
-    callId: string;
-    toolName: string;
-    outputData: unknown;
-    isError: boolean;
-  }): void {
+  private _handleToolCallComplete(
+    data: IAgentManager.IAgentEventTypeMap['tool_call_complete']
+  ): void {
     const context = this._toolContexts.get(data.callId);
     const output = Private.formatToolOutput(data.outputData);
     const displayOutputs =
@@ -350,37 +327,8 @@ export class AIKernel extends BaseKernel {
     }
 
     if (context) {
-      const status: ToolCallStatus = data.isError ? 'error' : 'completed';
-
-      const html = this._buildToolCallHtml({
-        toolName: context.toolName,
-        input: context.input,
-        status,
-        summary: context.summary,
-        output
-      });
-
-      const text = Private.buildToolCallText({
-        toolName: context.toolName,
-        input: context.input,
-        status,
-        summary: context.summary,
-        output,
-        trans: this._trans
-      });
-
-      this.updateDisplayData({
-        data: {
-          'text/html': html,
-          'text/plain': text
-        },
-        metadata: {},
-        transient: {
-          display_id: context.displayId
-        }
-      });
-
-      // Clean up the context
+      const status = data.isError ? 'failed' : 'completed';
+      this.updateDisplayData(this._toolCallContent(context, status, output));
       this._toolContexts.delete(data.callId);
     } else {
       // Fallback if context is not found
@@ -403,117 +351,71 @@ export class AIKernel extends BaseKernel {
   }
 
   /**
-   * Build tool call HTML string using the shared component.
+   * Build the display content for a tool call card.
    */
-  private _buildToolCallHtml(options: IToolCallMetadata): string {
-    return buildToolCallHtml({
-      ...options,
-      trans: this._trans,
-      toolCallApproval: null
-    }).outerHTML;
-  }
-
-  /**
-   * Handle tool approval requests by auto-approving in AI kernels.
-   *
-   * The kernel output model does not currently expose interactive approve/reject
-   * controls, so we resolve approval requests automatically to avoid hanging.
-   */
-  private _handleToolApprovalRequest(data: {
-    approvalId: string;
-    toolCallId: string;
-  }): void {
-    const context = this._toolContexts.get(data.toolCallId);
-    if (context) {
-      context.approvalId = data.approvalId;
-
-      const html = this._buildToolCallHtml({
-        toolName: context.toolName,
-        input: context.input,
-        status: 'awaiting_approval',
-        summary: context.summary,
-        approvalId: data.approvalId
-      });
-
-      const text = Private.buildToolCallText({
-        toolName: context.toolName,
-        input: context.input,
-        status: 'awaiting_approval',
-        summary: context.summary,
-        trans: this._trans
-      });
-
-      this.updateDisplayData({
-        data: {
-          'text/html': html,
-          'text/plain': text
-        },
-        metadata: {},
-        transient: {
-          display_id: context.displayId
-        }
-      });
-    }
-
-    // The upstream agent emits the approval request event before it stores the
-    // pending approval. Resolve on the next microtask so the approval is not
-    // dropped and the agent does not wait forever.
-    void Promise.resolve().then(() => {
-      this._agentManager.approveToolCall(
-        data.approvalId,
-        'Auto-approved in AI kernel'
-      );
-    });
-  }
-
-  /**
-   * Handle tool approval resolution by updating the display state.
-   */
-  private _handleToolApprovalResolved(data: {
-    approvalId: string;
-    approved: boolean;
-  }): void {
-    const contextEntry = Array.from(this._toolContexts.entries()).find(
-      ([, item]) => item.approvalId === data.approvalId
-    );
-    const [callId, context] = contextEntry ?? [];
-
-    if (!context) {
-      return;
-    }
-
-    const status: ToolCallStatus = data.approved ? 'approved' : 'rejected';
-
-    const html = this._buildToolCallHtml({
-      toolName: context.toolName,
-      input: context.input,
+  private _toolCallContent(
+    context: IToolCallContext,
+    status: ToolCallStatus,
+    output?: string
+  ) {
+    const entry = {
+      toolCallId: context.callId,
+      title: context.title ?? context.toolName,
+      summary: context.summary || undefined,
+      kind: context.toolName,
       status,
-      summary: context.summary,
-      approvalId: context.approvalId
-    });
+      rawInput: context.input,
+      rawOutput: output
+    } satisfies IToolCallsEntry;
 
-    const text = Private.buildToolCallText({
-      toolName: context.toolName,
-      input: context.input,
-      status,
-      summary: context.summary,
-      trans: this._trans
-    });
-
-    this.updateDisplayData({
+    return {
       data: {
-        'text/html': html,
-        'text/plain': text
+        [CHAT_COMPONENTS_MIME_TYPE]: 'grouped-tool-calls',
+        'text/plain': Private.buildToolCallText({
+          toolName: context.toolName,
+          input: context.input,
+          status,
+          summary: context.summary,
+          output,
+          trans: this._trans
+        })
       },
-      metadata: {},
+      metadata: {
+        [CHAT_COMPONENTS_MIME_TYPE]: { toolCalls: [entry] }
+      },
       transient: {
         display_id: context.displayId
       }
-    });
+    };
+  }
 
-    if (!data.approved && callId) {
-      this._toolContexts.delete(callId);
+  /**
+   * Auto-approve tool calls, since kernel outputs have no approve/reject controls.
+   */
+  private _handleToolApprovalRequest(
+    data: IAgentManager.IAgentEventTypeMap['tool_approval_request']
+  ): void {
+    this._agentManager.approveToolCall(
+      data.toolCallId,
+      'Auto-approved in AI kernel'
+    );
+  }
+
+  /**
+   * Mark a tool call as failed when its approval was rejected.
+   */
+  private _handleToolApprovalResolved(
+    data: IAgentManager.IAgentEventTypeMap['tool_approval_resolved']
+  ): void {
+    const context = this._toolContexts.get(data.toolCallId);
+    if (data.approved || !context) {
+      return;
     }
+
+    this.updateDisplayData(
+      this._toolCallContent(context, 'failed', this._trans.__('Rejected'))
+    );
+    this._toolContexts.delete(data.toolCallId);
   }
 
   /**
@@ -543,34 +445,9 @@ export class AIKernel extends BaseKernel {
       );
 
       if (context) {
-        const html = this._buildToolCallHtml({
-          toolName: context.toolName,
-          input: context.input,
-          status: 'error',
-          summary: context.summary,
-          output: errorMessage
-        });
-
-        const text = Private.buildToolCallText({
-          toolName: context.toolName,
-          input: context.input,
-          status: 'error',
-          summary: context.summary,
-          output: errorMessage,
-          trans: this._trans
-        });
-
-        this.updateDisplayData({
-          data: {
-            'text/html': html,
-            'text/plain': text
-          },
-          metadata: {},
-          transient: {
-            display_id: context.displayId
-          }
-        });
-
+        this.updateDisplayData(
+          this._toolCallContent(context, 'failed', errorMessage)
+        );
         this._toolContexts.delete(data.callId);
       }
 
@@ -744,7 +621,7 @@ export class AIKernel extends BaseKernel {
     // Comms are not supported
   }
 
-  private _agentManager: AgentManager;
+  private _agentManager: IAgentManager;
   private _providerName: string;
   private _modelName: string;
   private _trans: TranslationBundle;
@@ -793,9 +670,7 @@ export class AIKernel extends BaseKernel {
  */
 namespace Private {
   export type IDisplayOutput =
-    | nbformat.IDisplayData
-    | nbformat.IDisplayUpdate
-    | nbformat.IExecuteResult;
+    nbformat.IDisplayData | nbformat.IDisplayUpdate | nbformat.IExecuteResult;
 
   interface IKernelDisplayContent {
     data: nbformat.IMimeBundle;
@@ -890,17 +765,11 @@ namespace Private {
     trans: TranslationBundle
   ): string => {
     switch (status) {
-      case 'pending':
+      case 'in_progress':
         return trans.__('Running...');
-      case 'awaiting_approval':
-        return trans.__('Awaiting Approval');
-      case 'approved':
-        return trans.__('Approved');
-      case 'rejected':
-        return trans.__('Rejected');
       case 'completed':
         return trans.__('Completed');
-      case 'error':
+      case 'failed':
         return trans.__('Error');
     }
   };
@@ -914,7 +783,8 @@ namespace Private {
     const summaryText = summary ? ` ${summary}` : '';
     let text = `[${trans.__('Tool: %1', toolName)}${summaryText}] (${statusText})\n${trans.__('Input')}: ${input}`;
     if (output !== undefined) {
-      const label = status === 'error' ? trans.__('Error') : trans.__('Result');
+      const label =
+        status === 'failed' ? trans.__('Error') : trans.__('Result');
       text += `\n${label}: ${output}`;
     }
     return text;

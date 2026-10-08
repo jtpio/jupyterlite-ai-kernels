@@ -5,10 +5,10 @@ description = "JupyterLite AI kernels demo"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "jupyterlite-ai>=0.12.0",
+    "jupyterlite-ai>=0.20.1",
     "jupyterlite-ai-kernels",
-    "jupyterlite-core>=0.7.0",
-    "jupyterlite-pyodide-kernel>=0.7.0",
+    "jupyterlite-core>=0.8.6",
+    "jupyterlite-pyodide-kernel>=0.8.6",
 ]
 
 [tool.uv.sources]
