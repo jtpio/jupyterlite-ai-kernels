@@ -5,13 +5,10 @@
  * Tools for the AI kernel.
  *
  * NOTE: These tools are implemented here for now but may be upstreamed
- * to @jupyterlite/ai in the future to be available to all AI agents.
+ * to @jupyternaut/agent in the future to be available to all AI agents.
  */
 
-import { tool } from 'ai';
-import { z } from 'zod';
-
-import type { ITool } from '@jupyterlite/ai';
+import type { ITool } from '@jupyternaut/agent';
 
 /**
  * The name of the display_data tool.
@@ -39,44 +36,27 @@ export function createDisplayDataTool(
     ? `Available MIME types: ${mimeTypes.join(', ')}`
     : 'Use standard MIME types (e.g., application/json, text/html, image/png, application/geo+json).';
 
-  return tool({
+  return {
     description: `Display rich data using JupyterLab's MIME renderers. You can provide either: (1) a single payload with "mime_type" + "data", or (2) a full Jupyter MIME bundle in "data" (mapping MIME types to values). Supports standard types like application/json, text/html, text/latex, image/png, and custom application/vnd.* types. ${mimeTypesList}`,
-    inputSchema: z.union([
-      z.object({
-        mime_type: z
-          .string()
-          .describe(
-            'The MIME type of the data (e.g., "application/json", "text/html", "text/latex", "image/png")'
-          ),
-        data: z
-          .any()
-          .describe(
-            'The content to display for this MIME type. For binary formats like images, use base64 encoding.'
-          ),
-        metadata: z
-          .record(z.string(), z.any())
-          .optional()
-          .nullable()
-          .describe('Optional metadata for the MIME bundle')
-      }),
-      z.object({
-        data: z
-          .record(z.string(), z.any())
-          .describe(
-            'A full Jupyter MIME bundle mapping MIME types to values (e.g., {"text/latex":"\\\\boxed{5}","text/plain":"5"}).'
-          ),
-        metadata: z
-          .record(z.string(), z.any())
-          .optional()
-          .nullable()
-          .describe('Optional metadata for the MIME bundle')
-      })
-    ]),
-    execute: async (input: {
-      mime_type?: string;
-      data: unknown;
-      metadata?: Record<string, any> | null;
-    }) => {
+    // A plain Standard Schema: the agent bundles its own zod, which fails on
+    // schemas built with another zod version.
+    inputSchema: {
+      '~standard': {
+        version: 1,
+        vendor: 'jupyterlite-ai-kernels',
+        validate: (value: unknown) =>
+          Private.isDisplayDataInput(value)
+            ? { value }
+            : {
+                issues: [{ message: 'Expected an object with a "data" field' }]
+              },
+        jsonSchema: {
+          input: () => Private.INPUT_JSON_SCHEMA,
+          output: () => Private.INPUT_JSON_SCHEMA
+        }
+      }
+    },
+    execute: async (input: Private.IDisplayDataInput) => {
       // The tool returns the data in a structured format.
       // The AIKernel will intercept this and emit a proper display_data message.
       return {
@@ -86,5 +66,43 @@ export function createDisplayDataTool(
         metadata: input.metadata
       };
     }
-  });
+  };
+}
+
+namespace Private {
+  /**
+   * The input of the display_data tool.
+   */
+  export interface IDisplayDataInput {
+    mime_type?: string;
+    data: unknown;
+    metadata?: Record<string, any> | null;
+  }
+
+  export const INPUT_JSON_SCHEMA = {
+    type: 'object',
+    properties: {
+      mime_type: {
+        type: 'string',
+        description:
+          'The MIME type of "data" (e.g., "application/json", "text/html", "text/latex", "image/png"). Omit it to pass a full MIME bundle in "data".'
+      },
+      data: {
+        description:
+          'The content to display for "mime_type" (use base64 encoding for binary formats like images), or, without "mime_type", a full Jupyter MIME bundle mapping MIME types to values (e.g., {"text/latex":"\\\\boxed{5}","text/plain":"5"}).'
+      },
+      metadata: {
+        type: ['object', 'null'],
+        additionalProperties: true,
+        description: 'Optional metadata for the MIME bundle'
+      }
+    },
+    required: ['data']
+  };
+
+  export function isDisplayDataInput(
+    value: unknown
+  ): value is IDisplayDataInput {
+    return !!value && typeof value === 'object' && 'data' in value;
+  }
 }

@@ -23,7 +23,7 @@ jobs:
         with:
           pnpm_version: '10'
 
-      - uses: actions/create-github-app-token@v1
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.APP_ID }}

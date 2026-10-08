@@ -3,5 +3,6 @@ node_modules
 **/lib
 **/package.json
 !/package.json
-jupyterlite_echo_kernel
+jupyterlite_ai_kernels
+eslint.config.mjs
 .venv

@@ -3,14 +3,14 @@
 [![Github Actions Status](https://github.com/jtpio/jupyterlite-ai-kernels/workflows/Build/badge.svg)](https://github.com/jtpio/jupyterlite-ai-kernels/actions/workflows/build.yml)
 [![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://jtpio.github.io/jupyterlite-ai-kernels/lab/index.html)
 
-AI kernels for JupyterLite. This extension dynamically registers one kernel per configured AI provider from `@jupyterlite/ai`. When users open a notebook with one of these kernels, cell contents are sent as prompts to the AI model and responses are streamed back.
+AI kernels for JupyterLite. This extension dynamically registers one kernel per configured AI provider from `@jupyterlite/ai` (via `@jupyternaut/agent`). When users open a notebook with one of these kernels, cell contents are sent as prompts to the AI model and responses are streamed back.
 
 https://github.com/user-attachments/assets/ee5bc8b1-c0bd-4603-b2f4-a98db350d217
 
 ## Requirements
 
-- JupyterLite >= 0.6.0
-- `@jupyterlite/ai` >= 0.14.0
+- JupyterLite >= 0.8.0
+- `jupyterlite-ai` >= 0.20.1
 
 ## Install
 
@@ -49,7 +49,7 @@ This project uses [pnpm](https://pnpm.io/) as the package manager.
 python -m pip install -e .
 
 # Link your development version of the extension with JupyterLab
-jupyter labextension develop . --overwrite
+jupyter-builder develop . --overwrite
 
 # Rebuild extension Typescript source after making changes
 pnpm run build
@@ -72,7 +72,7 @@ With the watch command running, every saved change will immediately be built loc
 pip uninstall jupyterlite-ai-kernels
 ```
 
-In development mode, you will also need to remove the symlink created by `jupyter labextension develop`
+In development mode, you will also need to remove the symlink created by `jupyter-builder develop`
 command. To find its location, you can run `jupyter labextension list` to figure out where the `labextensions`
 folder is located. Then you can remove the symlink named `jupyterlite-ai-kernels` within that folder.
 
